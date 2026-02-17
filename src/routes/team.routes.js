@@ -2,23 +2,23 @@ const express = require('express');
 const router = express.Router();
 
 const {
-  getServices,
-  getAllServicesAdmin,
-  createService,
-  updateService,
-  deleteService,
-} = require('../controllers/service.controller');
+  getTeamMembers,
+  getAllTeamMembersAdmin,
+  createTeamMember,
+  updateTeamMember,
+  deleteTeamMember,
+} = require('../controllers/teamMember.controller');
 
 const { authenticate } = require('../middleware/auth.middleware');
 const { canWrite, canDelete } = require('../middleware/role.middleware');
 
 // ── Public Routes ──────────────────────────────────────────
-router.get('/', getServices);
+router.get('/', getTeamMembers);
 
 // ── Admin Routes ───────────────────────────────────────────
-router.get('/admin', authenticate, getAllServicesAdmin);
-router.post('/admin', authenticate, canWrite, createService);
-router.put('/admin/:id', authenticate, canWrite, updateService);
-router.delete('/admin/:id', authenticate, canDelete, deleteService);
+router.get('/admin', authenticate, getAllTeamMembersAdmin);
+router.post('/admin', authenticate, canWrite, createTeamMember);
+router.put('/admin/:id', authenticate, canWrite, updateTeamMember);
+router.delete('/admin/:id', authenticate, canDelete, deleteTeamMember);
 
 module.exports = router;
