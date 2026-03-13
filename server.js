@@ -8,15 +8,18 @@ const connectDB = require('./src/config/db');
 
 const app = express();
 
+// ── Trust Proxy (required for Vercel) ─────────────────────
+app.set('trust proxy', 1);
+
 // ── Connect to Database ────────────────────────────────────
 connectDB();
 
 // ── Security Middleware ────────────────────────────────────
 app.use(helmet());
 
-// CORS
+// ── CORS ──────────────────────────────────────────────────
 const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',')
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
   : ['http://localhost:4200'];
 
 app.use(
@@ -32,15 +35,15 @@ app.use(
   })
 );
 
-// Rate limiting
+// ── Rate Limiting ─────────────────────────────────────────
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 100,
   message: { success: false, message: 'Too many requests. Please try again later.' },
 });
 
 const contactLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
+  windowMs: 60 * 60 * 1000,
   max: 5,
   message: { success: false, message: 'Too many contact submissions. Please try again later.' },
 });
@@ -60,7 +63,7 @@ if (process.env.NODE_ENV === 'development') {
 // ── Routes ─────────────────────────────────────────────────
 app.use('/api', require('./src/routes/index'));
 
-// Health check
+// ── Health Check ──────────────────────────────────────────
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
 });
