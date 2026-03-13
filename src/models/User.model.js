@@ -36,6 +36,11 @@ const userSchema = new mongoose.Schema(
     lastLogin: {
       type: Date,
     },
+    // ✅ حقل الصورة الشخصية
+    avatar: {
+      type: String,
+      default: null,
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -44,10 +49,8 @@ const userSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Hash password before saving — NO async/await, uses callback style
 userSchema.pre('save', async function () {
   if (!this.isModified('password')) return;
-
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
 });

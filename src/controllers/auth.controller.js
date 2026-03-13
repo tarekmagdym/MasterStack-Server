@@ -1,15 +1,16 @@
-const jwt = require('jsonwebtoken');
-const User = require('../models/User.model');
-const ActivityLog = require('../models/ActivityLog.model');
+const jwt          = require('jsonwebtoken');
+const User         = require('../models/User.model');
+const ActivityLog  = require('../models/ActivityLog.model');
+const { createSystemNotification } = require('./Notification.controller');
 
-/**
- * Generate a signed JWT token
- */
-const signToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const signToken = (id) =>
+  jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d',
   });
-};
+
+// ─── Controllers ──────────────────────────────────────────────────────────────
 
 /**
  * @desc   Login admin/employee
@@ -42,19 +43,28 @@ const login = async (req, res) => {
       });
     }
 
-    // Update last login
     user.lastLogin = new Date();
     await user.save({ validateBeforeSave: false });
 
     const token = signToken(user._id);
 
-    // Log activity
     await ActivityLog.create({
-      user: user._id,
-      action: 'LOGIN',
-      resourceType: 'Auth',
+      user:          user._id,
+      action:        'LOGIN',
+      resourceType:  'Auth',
       resourceTitle: user.email,
-      ipAddress: req.ip,
+      ipAddress:     req.ip,
+    });
+
+    await createSystemNotification({
+      title:        'New Login Detected',
+      titleAr:      'تم تسجيل دخول جديد',
+      message:      `A new login to your account was detected from IP: ${req.ip}.`,
+      messageAr:    `تم تسجيل دخول جديد لحسابك من عنوان IP: ${req.ip}.`,
+      type:         'info',
+      resourceType: 'Auth',
+      resourceId:   user._id,
+      recipient:    user._id,
     });
 
     res.status(200).json({
@@ -63,10 +73,11 @@ const login = async (req, res) => {
       data: {
         token,
         user: {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
+          _id:       user._id,
+          name:      user.name,
+          email:     user.email,
+          role:      user.role,
+          avatar:    user.avatar ?? null,
           lastLogin: user.lastLogin,
         },
       },
@@ -121,10 +132,48 @@ const changePassword = async (req, res) => {
     user.password = newPassword;
     await user.save();
 
+    await createSystemNotification({
+      title:        'Password Changed',
+      titleAr:      'تم تغيير كلمة المرور',
+      message:      "Your password was changed successfully. If this wasn't you, contact an administrator immediately.",
+      messageAr:    'تم تغيير كلمة مرورك بنجاح. إذا لم تقم بذلك، تواصل مع المسؤول فوراً.',
+      type:         'warning',
+      resourceType: 'Auth',
+      resourceId:   req.user._id,
+      recipient:    req.user._id,
+    });
+
     res.status(200).json({ success: true, message: 'Password changed successfully.' });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error.', error: error.message });
   }
 };
 
-module.exports = { login, getMe, changePassword };
+/**
+ * @desc   Upload / update profile avatar
+ * @route  POST /api/auth/avatar
+ * @access Private
+ */
+const updateAvatar = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No image uploaded.' });
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { avatar: req.file.path },
+      { new: true }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Avatar updated successfully.',
+      data: { avatar: user.avatar },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error.', error: error.message });
+  }
+};
+
+module.exports = { login, getMe, changePassword, updateAvatar };

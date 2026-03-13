@@ -1,30 +1,61 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose');
 
 const testimonialSchema = new mongoose.Schema(
   {
+    // ── Bilingual fields ───────────────────────────────────────────────────
     name: {
-      type: String,
-      required: [true, "Name is required"],
-      trim: true,
+      en: {
+        type: String,
+        required: [true, 'Name (en) is required'],
+        trim: true,
+      },
+      ar: {
+        type: String,
+        required: [true, 'Name (ar) is required'],
+        trim: true,
+      },
     },
     position: {
-      type: String,
-      required: [true, "Position is required"],
-      trim: true,
+      en: {
+        type: String,
+        required: [true, 'Position (en) is required'],
+        trim: true,
+      },
+      ar: {
+        type: String,
+        required: [true, 'Position (ar) is required'],
+        trim: true,
+      },
     },
     company: {
-      type: String,
-      required: [true, "Company is required"],
-      trim: true,
+      en: {
+        type: String,
+        required: [true, 'Company (en) is required'],
+        trim: true,
+      },
+      ar: {
+        type: String,
+        required: [true, 'Company (ar) is required'],
+        trim: true,
+      },
     },
     content: {
-      type: String,
-      required: [true, "Testimonial content is required"],
-      trim: true,
+      en: {
+        type: String,
+        required: [true, 'Testimonial content (en) is required'],
+        trim: true,
+      },
+      ar: {
+        type: String,
+        required: [true, 'Testimonial content (ar) is required'],
+        trim: true,
+      },
     },
+
+    // ── Non-translatable fields (unchanged) ───────────────────────────────
     rating: {
       type: Number,
-      required: [true, "Rating is required"],
+      required: [true, 'Rating is required'],
       min: 1,
       max: 5,
       default: 5,
@@ -35,7 +66,7 @@ const testimonialSchema = new mongoose.Schema(
     },
     avatarColor: {
       type: String,
-      default: "#4F46E5",
+      default: '#4F46E5',
     },
     isActive: {
       type: Boolean,
@@ -46,9 +77,7 @@ const testimonialSchema = new mongoose.Schema(
       default: 0,
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-module.exports = mongoose.model("Testimonial", testimonialSchema);
+module.exports = mongoose.model('Testimonial', testimonialSchema);

@@ -2,12 +2,23 @@ const mongoose = require('mongoose');
 
 const technologySchema = new mongoose.Schema(
   {
+    // ── Bilingual fields ───────────────────────────────────────────────────
     name: {
-      type: String,
-      required: [true, 'Technology name is required'],
-      trim: true,
-      maxlength: [50, 'Name cannot exceed 50 characters'],
+      en: {
+        type: String,
+        required: [true, 'Technology name (en) is required'],
+        trim: true,
+        maxlength: [50, 'Name (en) cannot exceed 50 characters'],
+      },
+      ar: {
+        type: String,
+        required: [true, 'Technology name (ar) is required'],
+        trim: true,
+        maxlength: [50, 'Name (ar) cannot exceed 50 characters'],
+      },
     },
+
+    // ── Non-translatable fields (unchanged) ───────────────────────────────
     logo: {
       type: String,
       required: [true, 'Technology logo is required'],

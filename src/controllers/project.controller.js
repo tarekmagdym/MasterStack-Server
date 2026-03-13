@@ -1,8 +1,59 @@
-const Project = require('../models/Project.model');
+const mongoose   = require('mongoose');
+const Project    = require('../models/Project.model');
 const ActivityLog = require('../models/ActivityLog.model');
+const { createSystemNotification } = require('./Notification.controller');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+const remapForPublic = (doc) => ({
+  ...doc,
+  image:   doc.thumbnail,
+  liveUrl: doc.projectUrl || '',
+  year:    doc.completionDate
+    ? new Date(doc.completionDate).getFullYear().toString()
+    : '',
+});
+
+const makeSlug = (titleEn) =>
+  titleEn
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+
+const sanitizeBody = (body, isNew = false) => {
+  const data = { ...body };
+
+  if (!data.completionDate || data.completionDate === '') {
+    delete data.completionDate;
+  }
+
+  if (
+    data.shortDescription &&
+    !data.shortDescription.en?.trim() &&
+    !data.shortDescription.ar?.trim()
+  ) {
+    delete data.shortDescription;
+  }
+
+  if (data.category) {
+    data.category = data.category.toLowerCase().trim();
+  }
+
+  if (isNew && data.title?.en) {
+    data.slug = makeSlug(data.title.en);
+  }
+
+  return data;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC endpoints
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * @desc   Get all published projects (public)
+ * @desc   Get all published projects
  * @route  GET /api/projects
  * @access Public
  */
@@ -11,7 +62,7 @@ const getProjects = async (req, res) => {
     const { category, featured, page = 1, limit = 20 } = req.query;
 
     const filter = { isPublished: true };
-    if (category) filter.category = category;
+    if (category) filter.category = category.toLowerCase();
     if (featured === 'true') filter.isFeatured = true;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -21,14 +72,20 @@ const getProjects = async (req, res) => {
         .sort({ order: 1, createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit))
-        .select('-createdBy -updatedBy -__v'),
+        .select('title description shortDescription tags slug thumbnail images technologies category clientName projectUrl completionDate isFeatured isPublished order createdAt')
+        .lean(),
       Project.countDocuments(filter),
     ]);
 
     res.status(200).json({
       success: true,
-      data: projects,
-      pagination: { total, page: parseInt(page), limit: parseInt(limit), pages: Math.ceil(total / limit) },
+      data: projects.map(remapForPublic),
+      pagination: {
+        total,
+        page:  parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit)),
+      },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error.', error: error.message });
@@ -36,32 +93,49 @@ const getProjects = async (req, res) => {
 };
 
 /**
- * @desc   Get single project by slug (public)
+ * @desc   Get single published project by slug OR _id
  * @route  GET /api/projects/:slug
  * @access Public
  */
 const getProjectBySlug = async (req, res) => {
   try {
-    const project = await Project.findOne({ slug: req.params.slug, isPublished: true }).select('-createdBy -updatedBy -__v');
+    const { slug } = req.params;
+    const isObjectId = mongoose.Types.ObjectId.isValid(slug);
+
+    const filter = isObjectId
+      ? { _id: slug,  isPublished: true }
+      : { slug: slug, isPublished: true };
+
+    const project = await Project.findOne(filter)
+      .select('-createdBy -updatedBy -__v')
+      .lean();
+
     if (!project) {
       return res.status(404).json({ success: false, message: 'Project not found.' });
     }
-    res.status(200).json({ success: true, data: project });
+
+    res.status(200).json({ success: true, data: remapForPublic(project) });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error.', error: error.message });
   }
 };
 
-/**
- * @desc   Get all projects for dashboard (admin)
- * @route  GET /api/admin/projects
- * @access Private
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN endpoints
+// ─────────────────────────────────────────────────────────────────────────────
+
 const getAllProjectsAdmin = async (req, res) => {
   try {
-    const { page = 1, limit = 20, search } = req.query;
+    const { page = 1, limit = 12, search } = req.query;
     const filter = {};
-    if (search) filter.title = { $regex: search, $options: 'i' };
+
+    if (search) {
+      filter.$or = [
+        { 'title.en': { $regex: search, $options: 'i' } },
+        { 'title.ar': { $regex: search, $options: 'i' } },
+        { clientName:  { $regex: search, $options: 'i' } },
+      ];
+    }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -78,90 +152,129 @@ const getAllProjectsAdmin = async (req, res) => {
     res.status(200).json({
       success: true,
       data: projects,
-      pagination: { total, page: parseInt(page), limit: parseInt(limit), pages: Math.ceil(total / limit) },
+      pagination: {
+        total,
+        page:  parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit)),
+      },
     });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error.', error: error.message });
   }
 };
 
-/**
- * @desc   Create new project
- * @route  POST /api/admin/projects
- * @access Private (admin+)
- */
 const createProject = async (req, res) => {
   try {
-    const project = await Project.create({ ...req.body, createdBy: req.user._id });
+    const data    = sanitizeBody(req.body, true);
+    const project = new Project({ ...data, createdBy: req.user._id });
+    await project.save();
 
     await ActivityLog.create({
-      user: req.user._id,
-      action: 'CREATE',
+      user:          req.user._id,
+      action:        'CREATE',
+      resourceType:  'Project',
+      resourceId:    project._id,
+      resourceTitle: project.title?.en || '',
+      ipAddress:     req.ip,
+    });
+
+    // ✅ Broadcast — all admins notified of new project
+    await createSystemNotification({
+      title:        'New Project Added',
+      titleAr:      'تمت إضافة مشروع جديد',
+      message:      `Project "${project.title?.en || 'Untitled'}" has been created by ${req.user.name}.`,
+      messageAr:    `تم إنشاء مشروع "${project.title?.ar || project.title?.en || 'بدون عنوان'}" بواسطة ${req.user.name}.`,
+      type:         'success',
       resourceType: 'Project',
-      resourceId: project._id,
-      resourceTitle: project.title,
-      ipAddress: req.ip,
+      resourceId:   project._id,
+      recipient:    null,
     });
 
     res.status(201).json({ success: true, message: 'Project created.', data: project });
   } catch (error) {
-    if (error.code === 11000) {
+    if (error.code === 11000)
       return res.status(400).json({ success: false, message: 'A project with this title already exists.' });
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map((e) => e.message);
+      return res.status(400).json({ success: false, message: messages.join(' | ') });
     }
     res.status(500).json({ success: false, message: 'Server error.', error: error.message });
   }
 };
 
-/**
- * @desc   Update project
- * @route  PUT /api/admin/projects/:id
- * @access Private (admin+)
- */
 const updateProject = async (req, res) => {
   try {
+    const data = sanitizeBody(req.body);
+    if (data.title?.en) data.slug = makeSlug(data.title.en);
+
     const project = await Project.findByIdAndUpdate(
       req.params.id,
-      { ...req.body, updatedBy: req.user._id },
+      { ...data, updatedBy: req.user._id },
       { new: true, runValidators: true }
     );
-    if (!project) {
+
+    if (!project)
       return res.status(404).json({ success: false, message: 'Project not found.' });
-    }
 
     await ActivityLog.create({
-      user: req.user._id,
-      action: 'UPDATE',
+      user:          req.user._id,
+      action:        'UPDATE',
+      resourceType:  'Project',
+      resourceId:    project._id,
+      resourceTitle: project.title?.en || '',
+      ipAddress:     req.ip,
+    });
+
+    // ✅ Broadcast — all admins notified of project update
+    await createSystemNotification({
+      title:        'Project Updated',
+      titleAr:      'تم تحديث مشروع',
+      message:      `Project "${project.title?.en || 'Untitled'}" has been updated by ${req.user.name}.`,
+      messageAr:    `تم تحديث مشروع "${project.title?.ar || project.title?.en || 'بدون عنوان'}" بواسطة ${req.user.name}.`,
+      type:         'info',
       resourceType: 'Project',
-      resourceId: project._id,
-      resourceTitle: project.title,
-      ipAddress: req.ip,
+      resourceId:   project._id,
+      recipient:    null,
     });
 
     res.status(200).json({ success: true, message: 'Project updated.', data: project });
   } catch (error) {
+    if (error.code === 11000)
+      return res.status(400).json({ success: false, message: 'A project with this title already exists.' });
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map((e) => e.message);
+      return res.status(400).json({ success: false, message: messages.join(' | ') });
+    }
     res.status(500).json({ success: false, message: 'Server error.', error: error.message });
   }
 };
 
-/**
- * @desc   Delete project
- * @route  DELETE /api/admin/projects/:id
- * @access Private (admin+)
- */
 const deleteProject = async (req, res) => {
   try {
     const project = await Project.findByIdAndDelete(req.params.id);
-    if (!project) {
+    if (!project)
       return res.status(404).json({ success: false, message: 'Project not found.' });
-    }
 
     await ActivityLog.create({
-      user: req.user._id,
-      action: 'DELETE',
+      user:          req.user._id,
+      action:        'DELETE',
+      resourceType:  'Project',
+      resourceId:    project._id,
+      resourceTitle: project.title?.en || '',
+      ipAddress:     req.ip,
+    });
+
+    // ✅ Broadcast — all admins notified of project deletion
+    await createSystemNotification({
+      title:        'Project Deleted',
+      titleAr:      'تم حذف مشروع',
+      message:      `Project "${project.title?.en || 'Untitled'}" has been permanently deleted by ${req.user.name}.`,
+      messageAr:    `تم حذف مشروع "${project.title?.ar || project.title?.en || 'بدون عنوان'}" بشكل نهائي بواسطة ${req.user.name}.`,
+      type:         'warning',
       resourceType: 'Project',
-      resourceId: project._id,
-      resourceTitle: project.title,
-      ipAddress: req.ip,
+      resourceId:   project._id,
+      recipient:    null,
     });
 
     res.status(200).json({ success: true, message: 'Project deleted.' });
@@ -170,4 +283,11 @@ const deleteProject = async (req, res) => {
   }
 };
 
-module.exports = { getProjects, getProjectBySlug, getAllProjectsAdmin, createProject, updateProject, deleteProject };
+module.exports = {
+  getProjects,
+  getProjectBySlug,
+  getAllProjectsAdmin,
+  createProject,
+  updateProject,
+  deleteProject,
+};
